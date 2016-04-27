@@ -3,43 +3,22 @@
 #include "util/ESP8266_AT.h"
 #include "stdio.h"
 
+////////////////////////
+// Buffer Definitions //
+////////////////////////
 #define ESP8266_RX_BUFFER_LEN 128	// Number of bytes in the serial receive buffer
+#define TCP_RX_BUFFER_LEN 128
 char esp8266RxBuffer[ESP8266_RX_BUFFER_LEN];
+char tcpRxBuffer[TCP_RX_BUFFER_LEN];
 volatile unsigned int bufferHead; // Holds position of latest byte placed in buffer.
+volatile unsigned int tcpBufferHead = 0;
+volatile bool buffering = FALSE;
+
+char receiveState = 0x00;
 
 ////////////////////
-// WiFi Functions //
+// Initialization //
 ////////////////////
-
-bool esp8266ReadForResponse(const char * rsp, unsigned int timeout)
-{
-	unsigned long timeIn = millis();	// Timestamp coming into function
-	while (timeIn + timeout > millis()) // While we haven't timed out
-	{
-		if (esp8266RxBufferAvailable()) // If data is available on ESP8266_USART RX
-		{
-			if (esp8266SearchBuffer(rsp))	// Search the buffer for goodRsp
-				return TRUE;
-		}
-	}
-	return FALSE; // Return the timeout error code
-}
-
-bool esp8266ReadForResponses(const char * pass, const char * fail, unsigned int timeout)
-{
-	unsigned long timeIn = millis();	// Timestamp coming into function
-	while (timeIn + timeout > millis()) // While we haven't timed out
-	{
-		if (esp8266RxBufferAvailable()) // If data is available on UART RX
-		{
-			if (esp8266SearchBuffer(pass))	// Search the buffer for goodRsp
-				return TRUE;	// Return how number of chars read
-			if (esp8266SearchBuffer(fail))
-				return FALSE;
-		}
-	}
-	return FALSE;
-}
 
 bool esp8266Begin()
 {
@@ -54,75 +33,9 @@ bool esp8266Begin()
 	return FALSE;
 }
 
-bool esp8266Connect(const char * ssid, const char * pwd)
-{
-	// The ESP8266 can be set to one of three modes:
-	//  1 - ESP8266_MODE_STA - Station only
-	//  2 - ESP8266_MODE_AP - Access point only
-	//  3 - ESP8266_MODE_STAAP - Station/AP combo
-
-	if(esp8266SetMode(ESP8266_MODE_STA))
-	{
-		usartSendArrar(USART2, "Mode set to station\n");
-		esp8266ClearBuffer();
-		usartSendArrar(ESP8266_USART, "AT");
-		usartSendArrar(ESP8266_USART, (uint8_t *)ESP8266_CONNECT_AP);
-		usartSendArrar(ESP8266_USART, "=\"");
-		usartSendArrar(ESP8266_USART, (uint8_t *)ssid);
-		usartSendArrar(ESP8266_USART, "\"");
-		if (pwd != NULL)
-		{
-			usartSendArrar(ESP8266_USART, ",");
-			usartSendArrar(ESP8266_USART, "\"");
-			usartSendArrar(ESP8266_USART, (uint8_t *)pwd);
-			usartSendArrar(ESP8266_USART, "\"");
-		}
-		usartSendArrar(ESP8266_USART, "\r\n");
-	
-		return esp8266ReadForResponses(RESPONSE_OK, RESPONSE_FAIL, WIFI_CONNECT_TIMEOUT);
-	}
-	return FALSE;
-}
-
-void esp8266ClearBuffer()
-{
-	memset(esp8266RxBuffer, '\0', ESP8266_RX_BUFFER_LEN);
-	bufferHead = 0;
-}
-
-bool esp8266RxBufferAvailable()
-{
-	return (bufferHead > 0) ? TRUE:FALSE;
-}
-
-bool esp8266SearchBuffer(const char * test)
-{
-	int i =0;
-	int bufferLen = strlen((const char *)esp8266RxBuffer);
-	// If our buffer isn't full, just do an strstr
-	if (bufferLen < ESP8266_RX_BUFFER_LEN)
-	{
-		if(strstr((const char *)esp8266RxBuffer, test))
-		{
-			return TRUE;
-		}
-		else
-		{
-			return FALSE;
-		}
-	}
-	else
-	{	//! TODO
-		// If the buffer is full, we need to search from the end of the 
-		// buffer back to the beginning.
-		int testLen = strlen(test);
-		for (i=0; i<ESP8266_RX_BUFFER_LEN; i++)
-		{
-			
-		}
-	}
-	return FALSE;
-}
+///////////////////////
+// Basic AT Commands //
+///////////////////////
 
 bool esp8266Test()
 {
@@ -133,6 +46,10 @@ bool esp8266Test()
 		return TRUE;
 	return FALSE;
 }
+
+////////////////////
+// WiFi Functions //
+////////////////////
 
 int16_t esp8266GetMode()
 {
@@ -166,29 +83,34 @@ bool esp8266SetMode(esp8266_wifi_mode mode)
 	return esp8266ReadForResponse(RESPONSE_OK, COMMAND_RESPONSE_TIMEOUT);
 }
 
-void esp8266SendCommand(const char * cmd, esp8266_command_type type, const char * params)
+bool esp8266Connect(const char * ssid, const char * pwd)
 {
-	esp8266ClearBuffer();	// Clear the class receive buffer (esp8266RxBuffer)
-	usartSendArrar(ESP8266_USART, "AT");
-	usartSendArrar(ESP8266_USART, (uint8_t *)cmd);
-	if (type == ESP8266_CMD_QUERY)
-		usartSendArrar(ESP8266_USART, "?");
-	else if (type == ESP8266_CMD_SETUP)
-	{
-		usartSendArrar(ESP8266_USART, "=");
-		usartSendArrar(ESP8266_USART, (uint8_t *)params);
-	}
-	usartSendArrar(ESP8266_USART, "\r\n");
-}
-
-bool esp8266SetMux(uint8_t mux)
-{
+	// The ESP8266 can be set to one of three modes:
+	//  1 - ESP8266_MODE_STA - Station only
+	//  2 - ESP8266_MODE_AP - Access point only
+	//  3 - ESP8266_MODE_STAAP - Station/AP combo
 	bool rc = FALSE;
-	char params[2] = {0, 0};
-	params[0] = (mux > 0) ? '1' : '0';
-	esp8266SendCommand(ESP8266_TCP_MULTIPLE, ESP8266_CMD_SETUP, params);
-	rc = esp8266ReadForResponse(RESPONSE_OK, COMMAND_RESPONSE_TIMEOUT);
-	return rc;
+	if(esp8266SetMode(ESP8266_MODE_STA))
+	{
+		usartSendArrar(USART2, "Mode set to station\n");
+		esp8266ClearBuffer();
+		usartSendArrar(ESP8266_USART, "AT");
+		usartSendArrar(ESP8266_USART, (uint8_t *)ESP8266_CONNECT_AP);
+		usartSendArrar(ESP8266_USART, "=\"");
+		usartSendArrar(ESP8266_USART, (uint8_t *)ssid);
+		usartSendArrar(ESP8266_USART, "\"");
+		if (pwd != NULL)
+		{
+			usartSendArrar(ESP8266_USART, ",");
+			usartSendArrar(ESP8266_USART, "\"");
+			usartSendArrar(ESP8266_USART, (uint8_t *)pwd);
+			usartSendArrar(ESP8266_USART, "\"");
+		}
+		usartSendArrar(ESP8266_USART, "\r\n");
+		rc = esp8266ReadForResponses(RESPONSE_OK, RESPONSE_FAIL, WIFI_CONNECT_TIMEOUT);
+		return rc;
+	}
+	return FALSE;
 }
 
 /////////////////////
@@ -268,17 +190,190 @@ bool esp8266TcpClose()
 	return rc;
 }
 
+bool esp8266SetMux(uint8_t mux)
+{
+	bool rc = FALSE;
+	char params[2] = {0, 0};
+	params[0] = (mux > 0) ? '1' : '0';
+	esp8266SendCommand(ESP8266_TCP_MULTIPLE, ESP8266_CMD_SETUP, params);
+	rc = esp8266ReadForResponse(RESPONSE_OK, COMMAND_RESPONSE_TIMEOUT);
+	return rc;
+}
+
+int tcp_getdata(unsigned char* buf, int count)
+{
+	int i;
+	if(count <= TCP_RX_BUFFER_LEN)
+	{
+		for(i = 0; i < count; i++)
+		{
+			*(buf + i) = tcpRxBuffer[i];
+		}
+		for(i = 0; i < TCP_RX_BUFFER_LEN - count; i++)
+		{
+			tcpRxBuffer[i] = tcpRxBuffer[i+count];
+		}
+		return count;
+	}
+	else
+	{
+		return -1;
+	}
+}
+
+//////////////////////////////////////////////////
+// Private, Low-Level, Ugly, Hardware Functions //
+//////////////////////////////////////////////////
+
+void esp8266SendCommand(const char * cmd, esp8266_command_type type, const char * params)
+{
+	esp8266ClearBuffer();	// Clear the class receive buffer (esp8266RxBuffer)
+	usartSendArrar(ESP8266_USART, "AT");
+	usartSendArrar(ESP8266_USART, (uint8_t *)cmd);
+	if (type == ESP8266_CMD_QUERY)
+		usartSendArrar(ESP8266_USART, "?");
+	else if (type == ESP8266_CMD_SETUP)
+	{
+		usartSendArrar(ESP8266_USART, "=");
+		usartSendArrar(ESP8266_USART, (uint8_t *)params);
+	}
+	usartSendArrar(ESP8266_USART, "\r\n");
+}
+
+bool esp8266ReadForResponse(const char * rsp, unsigned int timeout)
+{
+	unsigned long timeIn = millis();	// Timestamp coming into function
+	while (timeIn + timeout > millis()) // While we haven't timed out
+	{
+		if (esp8266RxBufferAvailable()) // If data is available on ESP8266_USART RX
+		{
+			if (esp8266SearchBuffer(rsp))	// Search the buffer for goodRsp
+				return TRUE;
+		}
+	}
+	return FALSE; // Return the timeout error code
+}
+
+bool esp8266ReadForResponses(const char * pass, const char * fail, unsigned int timeout)
+{
+	bool rc = FALSE;
+	unsigned long timeIn = millis();	// Timestamp coming into function
+	while (timeIn + timeout > millis()) // While we haven't timed out
+	{
+		if (esp8266RxBufferAvailable()) // If data is available on UART RX
+		{
+			rc = esp8266SearchBuffer(pass);
+			if (rc)	// Search the buffer for goodRsp
+				return TRUE;	// Return how number of chars read
+			rc = esp8266SearchBuffer(fail);
+			if (rc)
+				return FALSE;
+		}
+	}
+	return FALSE;
+}
+
+//////////////////
+// Buffer Stuff //
+//////////////////
+
+void esp8266ClearBuffer()
+{
+	memset(esp8266RxBuffer, '\0', ESP8266_RX_BUFFER_LEN);
+	bufferHead = 0;
+}
+
+bool esp8266ReadTcpData()
+{
+	bool rc;
+	int len = 0;
+	uint8_t i, byteOfLen = 0;
+	char *p;
+	rc = esp8266ReadForResponse(RESPONSE_RECEIVED, COMMAND_RESPONSE_TIMEOUT);
+	if(rc)
+	{
+		p = strstr((const char *)esp8266RxBuffer, "+IPD,");
+		if(p)
+		{
+			p += 5;
+			while(*p != ':')
+			{
+				if(byteOfLen == 0)
+					len += (int)(*p - '0');
+				else if(byteOfLen == 1)
+					len = (int)(*p - '0') + len * 10;
+				else if(byteOfLen == 2)
+					len += (int)(*p - '0') + len * 10;
+				p++;
+				if(byteOfLen >= 3)	//数据接收不完整，跳出循环（接下来的4个字节内没有接收到冒号）。
+				{
+					byteOfLen = 0;
+					return FALSE;
+				}
+				byteOfLen++;
+			}
+			p++;
+			for(i = 0; i < len; i++)
+			{
+				tcpRxBuffer[i] = *p;
+				p++;
+			}
+			esp8266ClearBuffer();
+			return TRUE;
+		}
+		else
+			return FALSE;
+	}
+	else
+	{
+		return FALSE;
+	}
+}
+
+bool esp8266RxBufferAvailable()
+{
+	return (bufferHead > 0) ? TRUE:FALSE;
+}
+
+bool esp8266SearchBuffer(const char * test)
+{
+	int i =0;
+	int bufferLen = strlen((const char *)esp8266RxBuffer);
+	// If our buffer isn't full, just do an strstr
+	if (bufferLen < ESP8266_RX_BUFFER_LEN)
+	{
+		if(strstr((const char *)esp8266RxBuffer, test))
+		{
+			return TRUE;
+		}
+		else
+		{
+			return FALSE;
+		}
+	}
+	else
+	{	//! TODO
+		// If the buffer is full, we need to search from the end of the 
+		// buffer back to the beginning.
+		int testLen = strlen(test);
+		for (i=0; i<ESP8266_RX_BUFFER_LEN; i++)
+		{
+			
+		}
+	}
+	return FALSE;
+}
+
+
 
 void USART1_IRQHandler(void)
 {
 	if(USART_GetITStatus(ESP8266_USART, USART_IT_RXNE) != RESET)
 	{
-		/* Read one byte from the receive data register */
 		esp8266RxBuffer[bufferHead++] = USART_ReceiveData(ESP8266_USART);
 	}
-    if(bufferHead == ESP8266_RX_BUFFER_LEN)
-    {
-      /* Disable the USARTz Receive interrupt */
-      USART_ITConfig(ESP8266_USART, USART_IT_RXNE, DISABLE);
-    }
+	if(bufferHead >= ESP8266_RX_BUFFER_LEN)
+	{
+		bufferHead = 0;
+	}
 }

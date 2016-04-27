@@ -10,7 +10,7 @@
 ///////////////////////////////
 // Command Response Timeouts //
 ///////////////////////////////
-#define COMMAND_RESPONSE_TIMEOUT 1000
+#define COMMAND_RESPONSE_TIMEOUT 10000
 #define COMMAND_PING_TIMEOUT 3000
 #define WIFI_CONNECT_TIMEOUT 30000
 #define COMMAND_RESET_TIMEOUT 5000
@@ -88,21 +88,24 @@ typedef enum  {
 //};
 
 ////////////////////
-// WiFi Functions //
+// Initialization //
 ////////////////////
 
 bool esp8266Begin(void);
-bool esp8266ReadForResponse(const char * rsp, unsigned int timeout);
-bool esp8266ReadForResponses(const char * pass, const char * fail, unsigned int timeout);
-void esp8266ClearBuffer(void);
-bool esp8266RxBufferAvailable(void); 
-bool esp8266SearchBuffer(const char * test);
-void esp8266SendCommand(const char * cmd, esp8266_command_type type, const char * params);
-bool esp8266SetMux(uint8_t mux);
-bool esp8266Connect(const char * ssid, const char * pwd);
+
+///////////////////////
+// Basic AT Commands //
+///////////////////////
+
 bool esp8266Test(void);
+
+////////////////////
+// WiFi Functions //
+////////////////////
+
 int16_t esp8266GetMode(void);
 bool esp8266SetMode(esp8266_wifi_mode mode);
+bool esp8266Connect(const char * ssid, const char * pwd);
 
 /////////////////////
 // TCP/IP Commands //
@@ -111,4 +114,26 @@ bool esp8266SetMode(esp8266_wifi_mode mode);
 bool esp8266TcpConnect(uint8_t * destination, uint8_t * port);
 bool esp8266TcpSend(uint8_t *buf, uint16_t size);
 bool esp8266TcpClose(void);
+bool esp8266SetMux(uint8_t mux);
+int tcp_getdata(unsigned char* buf, int count);
+
+//////////////////////////////////////////////////
+// Private, Low-Level, Ugly, Hardware Functions //
+//////////////////////////////////////////////////
+
+void esp8266SendCommand(const char * cmd, esp8266_command_type type, const char * params);
+bool esp8266ReadForResponse(const char * rsp, unsigned int timeout);
+bool esp8266ReadForResponses(const char * pass, const char * fail, unsigned int timeout);
+
+//////////////////
+// Buffer Stuff //
+//////////////////
+
+bool esp8266ReadTcpData(void);
+void esp8266ClearBuffer(void);
+bool esp8266RxBufferAvailable(void); 
+bool esp8266SearchBuffer(const char * test);
+
+
+
 #endif

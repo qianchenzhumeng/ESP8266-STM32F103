@@ -2,14 +2,10 @@
 
 volatile uint32_t millis_number = 0;
 
-void delay (unsigned int count)
+void delay (unsigned int timeout)
 {
-unsigned int index;
-
-	for(index =0;index<count;index++)
-	{
-		;
-	}
+	unsigned long timeIn = millis();
+	while(timeIn + timeout > millis());
 }
 
 void sysTickInit()
