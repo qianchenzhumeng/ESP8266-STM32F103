@@ -102,7 +102,7 @@ void usartSendArrar(USART_TypeDef *USART, uint8_t *Arrar)
 	}
 }
 
-void ussartSendData(USART_TypeDef *USART, uint8_t data)
+void usartSendData(USART_TypeDef *USART, uint8_t data)
 {
 	USART_SendData(USART, (uint8_t)data);
 	while(USART_GetFlagStatus(USART, USART_FLAG_TC) == RESET);
